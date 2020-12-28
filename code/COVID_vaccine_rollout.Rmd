@@ -1,0 +1,151 @@
+---
+title: "COVID Vaccine Rollout"
+author: "Brian Stacy"
+date: "12/27/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(gganimate)
+library(censusapi)
+#directory location
+dir <- 'C:/Users/wb469649/Documents/Github/COVID-20/'
+
+
+
+
+```
+
+# Source
+
+ Johns Hopkins University Centers for Civic Impact 
+ 
+```{r load}
+
+#read in vaccine data
+vaccine_df_raw <- read_csv(paste0(dir, 'data_tables/vaccine_data/raw_data/vaccine_data_us_state_timeline.csv'))
+
+#metadata
+meta_df <- read_csv(paste0(dir, 'data_tables/vaccine_data/raw_data/data_dictionary.csv'))
+
+
+```
+ 
+```{r metadata}
+
+kable(meta_df,
+      caption='Data Dictionary') %>%
+  kable_styling()
+
+```
+ 
+```{r vaccinedata}
+
+vaccine_df <- vaccine_df_raw %>%
+  distinct() %>%
+  complete(Province_State, date) %>%
+  group_by(Province_State ) %>%
+  fill(starts_with('doses')) %>%
+  mutate(resid=doses_alloc_total-doses_shipped_total-doses_admin_total,
+         date=if_else(date=='12/14/2010', '12/14/2020', date),
+         date=lubridate::mdy(date),
+         ) %>%
+  as_tibble()
+
+```
+ 
+ 
+ 
+```{r bar, fig.height=10, fig.width=8}
+
+plot_df <- vaccine_df %>%
+  group_by(Province_State, stabbr ) %>%
+  select(Province_State, date, doses_alloc_total, starts_with('doses_admin'),doses_shipped_total ) %>%
+  mutate(resid=doses_alloc_total-doses_admin_total) %>%
+  pivot_longer(cols = c( 'doses_admin_pfizer', 'doses_admin_moderna', 'doses_admin_unknown' ),
+               names_to='group',
+               values_to='doses') %>%
+  mutate(doses=if_else(is.na(doses), 0, doses),
+         group=factor(group, levels=c( 'doses_admin_pfizer', 'doses_admin_moderna','doses_admin_unknown' ), labels=c( 'Pfizer', 'Moderna', 'Not Specified' )),
+         state=Province_State) %>%
+  filter(date=='2020-12-26')
+
+p <- ggplot(plot_df, aes(x=state, y=doses, fill=group)) +
+    geom_bar(stat = "identity", position='stack') +
+    #geom_text(size = 4, position = position_stack(vjust = 0.5)) +
+    scale_y_continuous(labels = scales::comma) +
+    theme_bw() +
+  coord_flip() +
+  theme(
+    axis.title.y = element_blank(),
+    text = element_text(size = 12),
+    title= element_text(size = 14),
+    legend.position = 'bottom',
+    legend.title=element_blank()
+  ) +
+  labs(
+    caption = "Source: Johns Hopkins University Centers for Civic Impact.  https://coronavirus.jhu.edu/vaccines"
+  )
+
+p
+
+
+```
+ 
+ 
+```{r anim}
+
+anim_df <- vaccine_df %>%
+  group_by(Province_State, stabbr ) %>%
+  select(Province_State, date, doses_alloc_total, starts_with('doses_admin'),doses_shipped_total ) %>%
+  mutate(resid=doses_alloc_total-doses_admin_total) %>%
+  pivot_longer(cols = 'doses_admin_total',
+               names_to='group',
+               values_to='doses') %>%
+  mutate(doses=if_else(is.na(doses), 0, doses),
+         group=factor(group, levels=c( 'doses_admin_total' ), labels=c( 'Total' )),
+         state=Province_State) %>%
+  filter(max(doses)!=0)
+
+p <- ggplot(anim_df, aes(x=state, y=doses)) +
+    geom_bar(stat = "identity", position='stack', fill='#a8dadc') +
+    #geom_text(size = 4, position = position_stack(vjust = 0.5)) +
+    scale_y_continuous(labels = scales::comma) +
+    theme_bw() +
+  coord_flip() +
+  theme(
+    axis.title.y = element_blank(),
+    text = element_text(size = 12),
+    title= element_text(size = 14),
+    legend.position = 'bottom',
+    legend.title=element_blank()
+  ) +
+  labs(
+    caption = "Source: Johns Hopkins University Centers for Civic Impact.  https://coronavirus.jhu.edu/vaccines"
+  )
+
+anim <- p +
+  transition_time(date) +
+    ggtitle('Vaccine Doses Administered by State',
+          subtitle = "Date: {frame_time}"
+          ) +
+  ease_aes("linear") +
+  enter_fade() +
+  exit_fade()
+
+#anim
+
+animate(anim, fps = 10, width = 600, height = 800
+        , end_pause = 50)
+anim_save(paste0(dir,"/vaccinations.gif"))
+
+
+
+
+```
+ 
+ 
