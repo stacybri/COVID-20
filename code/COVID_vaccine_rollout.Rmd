@@ -12,9 +12,10 @@ library(knitr)
 library(kableExtra)
 library(gganimate)
 library(censusapi)
+
 #directory location
 dir <- 'C:/Users/wb469649/Documents/Github/COVID-20/'
-
+case_dir <- 'C:/Users/wb469649/Documents/Github/COVID-19/'
 
 
 
@@ -31,6 +32,23 @@ vaccine_df_raw <- read_csv(paste0(dir, 'data_tables/vaccine_data/raw_data/vaccin
 
 #metadata
 meta_df <- read_csv(paste0(dir, 'data_tables/vaccine_data/raw_data/data_dictionary.csv'))
+
+#state population data
+popest <- getCensus(
+    name = "pep/population",
+    vintage = 2019,
+    vars = c("NAME","POP", "DATE_DESC"),
+    region = "state:*") %>% 
+  select(NAME, POP) %>%
+  rename(state=NAME)
+
+#covid case data
+covid_df <- read_csv(paste0(case_dir,"/csse_covid_19_data/csse_covid_19_daily_reports_us/","12-27-2020.csv")) %>%
+  select(Province_State,Confirmed) %>%
+  rename(immune=Confirmed) %>%
+  mutate(group='Infected',
+         state=Province_State)
+
 
 
 ```
@@ -72,9 +90,11 @@ plot_df <- vaccine_df %>%
   mutate(doses=if_else(is.na(doses), 0, doses),
          group=factor(group, levels=c( 'doses_admin_pfizer', 'doses_admin_moderna','doses_admin_unknown' ), labels=c( 'Pfizer', 'Moderna', 'Not Specified' )),
          state=Province_State) %>%
+  left_join(popest) %>%
+  mutate(doses_pcap=doses/POP) %>%
   filter(date=='2020-12-26')
 
-p <- ggplot(plot_df, aes(x=state, y=doses, fill=group)) +
+p <- ggplot(plot_df, aes(x=state, y=doses_pcap, fill=group)) +
     geom_bar(stat = "identity", position='stack') +
     #geom_text(size = 4, position = position_stack(vjust = 0.5)) +
     scale_y_continuous(labels = scales::comma) +
@@ -109,9 +129,11 @@ anim_df <- vaccine_df %>%
   mutate(doses=if_else(is.na(doses), 0, doses),
          group=factor(group, levels=c( 'doses_admin_total' ), labels=c( 'Total' )),
          state=Province_State) %>%
-  filter(max(doses)!=0)
+  filter(max(doses)!=0) %>%
+    left_join(popest) %>%
+  mutate(doses_pcap=doses/POP) 
 
-p <- ggplot(anim_df, aes(x=state, y=doses)) +
+p <- ggplot(anim_df, aes(x=state, y=doses_pcap)) +
     geom_bar(stat = "identity", position='stack', fill='#a8dadc') +
     #geom_text(size = 4, position = position_stack(vjust = 0.5)) +
     scale_y_continuous(labels = scales::comma) +
@@ -124,13 +146,14 @@ p <- ggplot(anim_df, aes(x=state, y=doses)) +
     legend.position = 'bottom',
     legend.title=element_blank()
   ) +
+  ylab('Doses per Capita') +
   labs(
     caption = "Source: Johns Hopkins University Centers for Civic Impact.  https://coronavirus.jhu.edu/vaccines"
   )
 
 anim <- p +
   transition_time(date) +
-    ggtitle('Vaccine Doses Administered by State',
+    ggtitle('COVID Vaccine Doses per Capita Administered by State',
           subtitle = "Date: {frame_time}"
           ) +
   ease_aes("linear") +
@@ -147,5 +170,55 @@ anim_save(paste0(dir,"/vaccinations.gif"))
 
 
 ```
- 
+
+
+
+```{r imune, fig.height=12, fig.width=10}
+
+immune_df <- vaccine_df %>%
+  group_by(Province_State, stabbr ) %>%
+  select(Province_State, date, doses_alloc_total, starts_with('doses_admin'),doses_shipped_total ) %>%
+  mutate(resid=doses_alloc_total-doses_admin_total) %>%
+  pivot_longer(cols = c('doses_admin_total'),
+               names_to='group',
+               values_to='immune') %>%
+  mutate(immune=if_else(is.na(immune), 0, immune),
+         group=factor(group, levels=c( 'doses_admin_total' ), labels=c( 'Total' )),
+         state=Province_State) %>%
+  filter(max(immune)!=0) %>%
+  mutate(group='Vaccinated') %>%
+  filter(date=='2020-12-27') %>%
+  bind_rows(covid_df) %>%
+  left_join(popest) %>%
+  mutate(immune_pcap=immune/POP) 
+
+p <- ggplot(immune_df, aes(x=state, y=immune_pcap, fill=group)) +
+    geom_bar(stat = "identity", position='stack') +
+    #geom_text(size = 4, position = position_stack(vjust = 0.5)) +
+    scale_y_continuous(labels = scales::comma) +
+    theme_bw() +
+  coord_flip() +
+  theme(
+    axis.title.y = element_blank(),
+    text = element_text(size = 12),
+    title= element_text(size = 14),
+    legend.position = 'bottom',
+    legend.title=element_blank()
+  ) +
+  ylab('Vaccinated + Infected per Capita') +
+  labs(
+    caption = "Source: Johns Hopkins University Centers for Civic Impact.  https://coronavirus.jhu.edu/vaccines"
+  )
+
+p +
+    ggtitle('COVID Infected + Vaccinated per Capita by State',
+          subtitle = "Date: 2020-12-27"
+          ) 
+
+
+ggsave(paste0(dir,"/immune.png"))
+
+
+
+``` 
  
